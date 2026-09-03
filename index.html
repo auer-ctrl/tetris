@@ -83,6 +83,7 @@
       <li>&uarr; drehen</li>
       <li>&darr; schneller fallen</li>
       <li>Leertaste: Hard Drop</li>
+      <li>P: Pause</li>
     </ul>
   </div>
 
@@ -137,7 +138,7 @@ function newPiece() {
   };
 }
 
-let grid, current, next, score, level, lines, dropInterval, dropTimer, running, gameOverFlag;
+let grid, current, next, score, level, lines, dropInterval, dropTimer, running, gameOverFlag, paused;
 
 function init() {
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
@@ -147,6 +148,7 @@ function init() {
   dropInterval = 800;
   running = true;
   gameOverFlag = false;
+  paused = false;
   messageEl.textContent = '';
   current = newPiece();
   next = newPiece();
@@ -220,8 +222,20 @@ function gameOver() {
   messageEl.textContent = 'Game Over!';
 }
 
-function tick() {
+function togglePause() {
   if (!running) return;
+  paused = !paused;
+  if (paused) {
+    clearInterval(dropTimer);
+    messageEl.textContent = 'Pausiert';
+  } else {
+    messageEl.textContent = '';
+    dropTimer = setInterval(tick, dropInterval);
+  }
+}
+
+function tick() {
+  if (!running || paused) return;
   if (!collides(current, 0, 1)) {
     current.y++;
   } else {
@@ -231,7 +245,7 @@ function tick() {
 }
 
 function hardDrop() {
-  if (!running) return;
+  if (!running || paused) return;
   while (!collides(current, 0, 1)) {
     current.y++;
     score += 1;
@@ -242,7 +256,7 @@ function hardDrop() {
 }
 
 function move(dx) {
-  if (!running) return;
+  if (!running || paused) return;
   if (!collides(current, dx, 0)) {
     current.x += dx;
     draw();
@@ -250,7 +264,7 @@ function move(dx) {
 }
 
 function softDrop() {
-  if (!running) return;
+  if (!running || paused) return;
   if (!collides(current, 0, 1)) {
     current.y++;
     score += 1;
@@ -260,7 +274,7 @@ function softDrop() {
 }
 
 function rotate() {
-  if (!running) return;
+  if (!running || paused) return;
   if (current.type === 'O') return;
   const rotated = rotateCells(current.cells);
   const kicks = [0, -1, 1, -2, 2];
@@ -307,6 +321,7 @@ document.addEventListener('keydown', (e) => {
     case 'ArrowDown': softDrop(); e.preventDefault(); break;
     case 'ArrowUp': rotate(); e.preventDefault(); break;
     case ' ': hardDrop(); e.preventDefault(); break;
+    case 'p': case 'P': togglePause(); e.preventDefault(); break;
   }
 });
 
