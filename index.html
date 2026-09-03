@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Tetris</title>
+<style>
+  body {
+    background: #111827;
+    color: #e5e7eb;
+    font-family: system-ui, sans-serif;
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    gap: 24px;
+    padding: 32px;
+  }
+  #board {
+    border: 4px solid #4b5563;
+    background: #1f2937;
+  }
+  .panel {
+    width: 160px;
+  }
+  .panel h2 {
+    font-size: 16px;
+    margin: 0 0 8px;
+    color: #9ca3af;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  #score, #level, #lines {
+    font-size: 28px;
+    font-weight: bold;
+    margin-bottom: 16px;
+  }
+  #next {
+    border: 2px solid #4b5563;
+    background: #1f2937;
+    margin-bottom: 16px;
+  }
+  #message {
+    font-size: 20px;
+    font-weight: bold;
+    color: #f87171;
+    min-height: 28px;
+  }
+  ul {
+    padding-left: 18px;
+    font-size: 13px;
+    color: #9ca3af;
+    line-height: 1.6;
+  }
+  button {
+    margin-top: 12px;
+    padding: 8px 16px;
+    background: #2563eb;
+    color: white;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+  }
+  button:hover {
+    background: #1d4ed8;
+  }
+</style>
+</head>
+<body>
+  <canvas id="board" width="240" height="480"></canvas>
+  <div class="panel">
+    <h2>Punkte</h2>
+    <div id="score">0</div>
+    <h2>Level</h2>
+    <div id="level">1</div>
+    <h2>Reihen</h2>
+    <div id="lines">0</div>
+    <h2>N&auml;chster Stein</h2>
+    <canvas id="next" width="120" height="120"></canvas>
+    <div id="message"></div>
+    <button id="startBtn">Start / Neustart</button>
+    <ul>
+      <li>&larr; &rarr; bewegen</li>
+      <li>&uarr; drehen</li>
+      <li>&darr; schneller fallen</li>
+      <li>Leertaste: Hard Drop</li>
+    </ul>
+  </div>
+
+<script>
+const COLS = 12;
+const ROWS = 24;
+const BLOCK = 20;
+
+const ctx = document.getElementById('board').getContext('2d');
+const nextCtx = document.getElementById('next').getContext('2d');
+const scoreEl = document.getElementById('score');
+const levelEl = document.getElementById('level');
+const linesEl = document.getElementById('lines');
+const messageEl = document.getElementById('message');
+
+const COLORS = {
+  I: '#22d3ee',
+  J: '#3b82f6',
+  L: '#f97316',
+  O: '#facc15',
+  S: '#22c55e',
+  T: '#a855f7',
+  Z: '#ef4444',
+};
+
+const SHAPES = {
+  I: [[0,1],[1,1],[2,1],[3,1]],
+  J: [[0,0],[0,1],[1,1],[2,1]],
+  L: [[2,0],[0,1],[1,1],[2,1]],
+  O: [[0,0],[1,0],[0,1],[1,1]],
+  S: [[1,0],[2,0],[0,1],[1,1]],
+  T: [[1,0],[0,1],[1,1],[2,1]],
+  Z: [[0,0],[1,0],[1,1],[2,1]],
+};
+
+function rotateCells(cells) {
+  // rotate around a fixed 4x4-ish pivot at (1.5, 1.5)
+  return cells.map(([x, y]) => [
+    Math.round(3 - y),
+    Math.round(x),
+  ]);
+}
+
+function newPiece() {
+  const keys = Object.keys(SHAPES);
+  const type = keys[Math.floor(Math.random() * keys.length)];
+  return {
+    type,
+    cells: SHAPES[type].map(c => [...c]),
+    x: type === 'O' ? 5 : 4,
+    y: 0,
+  };
+}
+
+let grid, current, next, score, level, lines, dropInterval, dropTimer, running, gameOverFlag;
+
+function init() {
+  grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
+  score = 0;
+  level = 1;
+  lines = 0;
+  dropInterval = 800;
+  running = true;
+  gameOverFlag = false;
+  messageEl.textContent = '';
+  current = newPiece();
+  next = newPiece();
+  updateStats();
+  draw();
+  if (dropTimer) clearInterval(dropTimer);
+  dropTimer = setInterval(tick, dropInterval);
+}
+
+function updateStats() {
+  scoreEl.textContent = score;
+  levelEl.textContent = level;
+  linesEl.textContent = lines;
+}
+
+function absCells(piece) {
+  return piece.cells.map(([x, y]) => [piece.x + x, piece.y + y]);
+}
+
+function collides(piece, dx = 0, dy = 0, cells = null) {
+  const testCells = (cells || piece.cells).map(([x, y]) => [piece.x + x + dx, piece.y + y + dy]);
+  for (const [x, y] of testCells) {
+    if (x < 0 || x >= COLS || y >= ROWS) return true;
+    if (y >= 0 && grid[y][x]) return true;
+  }
+  return false;
+}
+
+function merge(piece) {
+  for (const [x, y] of absCells(piece)) {
+    if (y >= 0) grid[y][x] = piece.type;
+  }
+}
+
+function clearLines() {
+  let cleared = 0;
+  for (let y = ROWS - 1; y >= 0; y--) {
+    if (grid[y].every(cell => cell)) {
+      grid.splice(y, 1);
+      grid.unshift(Array(COLS).fill(null));
+      cleared++;
+      y++;
+    }
+  }
+  if (cleared > 0) {
+    const points = [0, 100, 300, 500, 800][cleared] * level;
+    score += points;
+    lines += cleared;
+    level = 1 + Math.floor(lines / 10);
+    dropInterval = Math.max(120, 800 - (level - 1) * 70);
+    clearInterval(dropTimer);
+    dropTimer = setInterval(tick, dropInterval);
+    updateStats();
+  }
+}
+
+function lockPiece() {
+  merge(current);
+  clearLines();
+  current = next;
+  next = newPiece();
+  if (collides(current)) {
+    gameOver();
+  }
+}
+
+function gameOver() {
+  running = false;
+  gameOverFlag = true;
+  clearInterval(dropTimer);
+  messageEl.textContent = 'Game Over!';
+}
+
+function tick() {
+  if (!running) return;
+  if (!collides(current, 0, 1)) {
+    current.y++;
+  } else {
+    lockPiece();
+  }
+  draw();
+}
+
+function hardDrop() {
+  if (!running) return;
+  while (!collides(current, 0, 1)) {
+    current.y++;
+    score += 1;
+  }
+  lockPiece();
+  updateStats();
+  draw();
+}
+
+function move(dx) {
+  if (!running) return;
+  if (!collides(current, dx, 0)) {
+    current.x += dx;
+    draw();
+  }
+}
+
+function softDrop() {
+  if (!running) return;
+  if (!collides(current, 0, 1)) {
+    current.y++;
+    score += 1;
+    updateStats();
+    draw();
+  }
+}
+
+function rotate() {
+  if (!running) return;
+  if (current.type === 'O') return;
+  const rotated = rotateCells(current.cells);
+  const kicks = [0, -1, 1, -2, 2];
+  for (const k of kicks) {
+    if (!collides(current, k, 0, rotated)) {
+      current.cells = rotated;
+      current.x += k;
+      draw();
+      return;
+    }
+  }
+}
+
+function drawCell(c, x, y, color) {
+  c.fillStyle = color;
+  c.fillRect(x * BLOCK, y * BLOCK, BLOCK - 1, BLOCK - 1);
+}
+
+function draw() {
+  ctx.fillStyle = '#1f2937';
+  ctx.fillRect(0, 0, COLS * BLOCK, ROWS * BLOCK);
+
+  for (let y = 0; y < ROWS; y++) {
+    for (let x = 0; x < COLS; x++) {
+      if (grid[y][x]) drawCell(ctx, x, y, COLORS[grid[y][x]]);
+    }
+  }
+
+  for (const [x, y] of absCells(current)) {
+    if (y >= 0) drawCell(ctx, x, y, COLORS[current.type]);
+  }
+
+  nextCtx.fillStyle = '#1f2937';
+  nextCtx.fillRect(0, 0, 120, 120);
+  for (const [x, y] of next.cells) {
+    drawCell(nextCtx, x + 1, y + 1, COLORS[next.type]);
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  switch (e.key) {
+    case 'ArrowLeft': move(-1); e.preventDefault(); break;
+    case 'ArrowRight': move(1); e.preventDefault(); break;
+    case 'ArrowDown': softDrop(); e.preventDefault(); break;
+    case 'ArrowUp': rotate(); e.preventDefault(); break;
+    case ' ': hardDrop(); e.preventDefault(); break;
+  }
+});
+
+document.getElementById('startBtn').addEventListener('click', init);
+
+init();
+</script>
+</body>
+</html>
